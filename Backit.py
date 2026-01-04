@@ -1124,6 +1124,7 @@ class SetupAppWindow(QMainWindow):
         self.selected_commit_hash = ""
         self.ignore_items = []
         self.previous_page_index = 0
+        self.pre_ignored_items = set()
         
         self.setup_ui()
         self.center_window()
@@ -1562,14 +1563,45 @@ class SetupAppWindow(QMainWindow):
 
     def on_menu_action(self, action):
         if action == "create":
-            # Delay heavy lifting to allow UI to switch
-            self.stacked.setCurrentIndex(2)
-            self.nav_container.show()
-            self.back_btn.show()
-            self.next_btn.show()
-            self.next_btn.setText("Continue")
-            self.progress_bar.set_target_progress(0.4)
-            QTimer.singleShot(100, self.start_ignore_tree_load)
+            # Smart Gitignore Check
+            gitignore_path = os.path.join(self.project_path, ".gitignore")
+            skip_ignore_page = False
+            
+            if os.path.exists(gitignore_path):
+                # Use Modern Dialog
+                should_update = self.show_modern_choice(
+                    "Update Ignore List?",
+                    "A .gitignore file already exists.\nDo you want to update it?",
+                    yes_text="Edit List",
+                    no_text="Keep Existing"
+                )
+                
+                if not should_update:
+                    skip_ignore_page = True
+                else:
+                    self.load_existing_gitignore()
+            else:
+                 self.pre_ignored_items = set()
+
+            if skip_ignore_page:
+                 # Go directly to Commit Page (3)
+                 self.stacked.setCurrentIndex(3)
+                 self.nav_container.show()
+                 self.back_btn.show()
+                 self.next_btn.show()
+                 self.next_btn.setText("Save Backup")
+                 self.progress_bar.set_target_progress(0.8)
+                 # Clear ignore items so we don't overwrite .gitignore with empty or old data
+                 self.ignore_items = []
+            else:
+                # Go to Ignore Page (2)
+                self.stacked.setCurrentIndex(2)
+                self.nav_container.show()
+                self.back_btn.show()
+                self.next_btn.show()
+                self.next_btn.setText("Continue")
+                self.progress_bar.set_target_progress(0.4)
+                QTimer.singleShot(100, self.start_ignore_tree_load)
         elif action == "restore":
             self.load_commits()
             self.stacked.setCurrentIndex(4)
@@ -1726,11 +1758,17 @@ class SetupAppWindow(QMainWindow):
                         
                     item = QTreeWidgetItem(parent_item)
                     item.setText(0, entry.name)
-                    item.setCheckState(0, Qt.CheckState.Unchecked)
                     
                     # Store relative path for gitignore
                     rel = os.path.relpath(entry.path, self.project_path)
                     item.setData(0, Qt.ItemDataRole.UserRole, rel)
+                    
+                    # Smart Check
+                    # Check both separator styles
+                    if rel in self.pre_ignored_items or rel.replace(os.sep, "/") in self.pre_ignored_items:
+                        item.setCheckState(0, Qt.CheckState.Checked)
+                    else:
+                        item.setCheckState(0, Qt.CheckState.Unchecked)
                     
                     if entry.is_dir():
                         item.setIcon(0, icon_folder)
@@ -1769,6 +1807,18 @@ class SetupAppWindow(QMainWindow):
             
             # Load real children
             self.populate_node(full_path, item)
+
+    def load_existing_gitignore(self):
+        self.pre_ignored_items = set()
+        path = os.path.join(self.project_path, ".gitignore")
+        if os.path.exists(path):
+            try:
+                with open(path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            self.pre_ignored_items.add(line)
+            except: pass
 
     def collect_ignored(self):
         self.ignore_items = []
@@ -2025,6 +2075,20 @@ class SetupAppWindow(QMainWindow):
         dlg.add_widget(lbl)
         dlg.add_button("Cancel", "reject")
         dlg.add_button("Confirm", "accept", confirm_color)
+        self.center_dialog(dlg)
+        return dlg.exec() == 1
+
+    def show_modern_choice(self, title, message, yes_text="Yes", no_text="No"):
+        dlg = ModernDialog(self, title)
+        lbl = QLabel(message)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(f"color: {Config.SUBTEXT}; font-size: 14px; border: none;")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        dlg.add_widget(lbl)
+        
+        dlg.add_button(no_text, "reject")
+        dlg.add_button(yes_text, "accept", Config.ACCENT)
+        
         self.center_dialog(dlg)
         return dlg.exec() == 1
 

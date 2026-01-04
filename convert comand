@@ -1,1 +1,0 @@
-pyinstaller --noconsole --onefile --icon="Backit.ico" --add-data "icons;icons" --add-data "Backit.ico;." Backit.py
